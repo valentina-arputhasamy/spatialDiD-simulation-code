@@ -1,0 +1,49 @@
+model{
+
+# likelihood #
+
+for(i in 1:N){
+	
+	y[i] ~ dmnorm(mu[i], tausq.inv)
+	
+	mu[i] <- beta[1] + beta[2]*trt[i] + beta[3]*time[i] + beta[4]*trt[i]*time[i] + omega0[region[i]] + omega1[region[i]]*trt[i] + omega2[region[i]]*time[i] + omega3[region[i]]*trt[i]*time[i]
+
+}
+
+omega0[1:c] ~ dmnorm(car.mu, sigmasq.inv[1]*car.precision.unscaled)
+omega1[1:c] ~ dmnorm(car.mu, sigmasq.inv[2]*car.precision.unscaled)
+omega2[1:c] ~ dmnorm(car.mu, sigmasq.inv[3]*car.precision.unscaled)
+omega3[1:c] ~ dmnorm(car.mu, sigmasq.inv[4]*car.precision.unscaled)
+
+# priors #
+
+
+for(j in 1:q){
+
+beta[j] ~ dnorm(0, 1/10000)
+
+}
+
+tausq.inv ~ dgamma(0.1, 0.1)
+
+tausq <- 1/tausq.inv
+
+for(j in 1:q){
+
+sigmasq.inv[j] ~ dgamma(0.1, 0.1)
+
+}
+
+sigsq <- 1/sigmasq.inv
+
+phi <- 0.99
+
+
+}
+
+
+
+
+
+
+
