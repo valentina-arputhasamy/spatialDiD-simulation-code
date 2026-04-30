@@ -10,7 +10,7 @@ output:
       smooth_scroll: true
 ---
 
-```{r include=FALSE}
+```{r loading libraries, include=FALSE}
 library(tidyverse)
 library(rjags)
 library(coda)
@@ -50,7 +50,7 @@ Simulated Datasets
 
 We consider three simulation datasets, each constructed so that the true data-generating process corresponds to one of the models under study. To ensure that the results in this document exactly match those reported in the simulation study of the manuscript, we load the pre-generated datasets and adjacency matrix used in the analysis. For completeness and transparency, we also provide the code used to generate these datasets; however, this code is not executed within this document.
 
-```{r}
+```{r loading in simulated data}
 data.tDiD <- read.table("./dgp-cls-homoskedastic/data/simData_clsHomoskedastic.txt", header = T)
 # simulated data generated under the traditional DiD data-generating process
 
@@ -66,7 +66,7 @@ W <- read.table("./dgp-us-homoskedastic/data/adjMatrix_usHomoskedastic.txt") %>%
 
 In the below chunk, we save spatial components required for fitting the US DiD and SVC DiD models.
 
-```{r}
+```{r loading in adjacency matrix}
 ## ----------------------------------------------------------------------------- 
 ### Save Spatial Components ###
 ## -----------------------------------------------------------------------------
@@ -100,7 +100,7 @@ Common Model Quantities
 
 We first define quantities that are common across all model specifications, including the number of spatial units and total number of observations.
 
-```{r}
+```{r saving fixed regression params}
 ## ----------------------------------------------------------------------------- 
 ## Save Some Regression Related Parameters ##
 ## ----------------------------------------------------------------------------- 
@@ -118,7 +118,7 @@ Traditional DiD Structured Data
 
 We now construct the design matrix and corresponding JAGS input lists for models fit to data generated under the traditional DiD specification.
 
-```{r}
+```{r tDiD JAGS input lists}
 ## ----------------------------------------------------------------------------- 
 ### Create TDiD Design Matrix ###
 ## ----------------------------------------------------------------------------- 
@@ -169,7 +169,7 @@ Uniform Spatial DiD Structured Data
 
 We now construct the design matrix and corresponding JAGS input lists for models fit to data generated under the US DiD specification.
 
-```{r}
+```{r usDiD JAGS input lists}
 ## ----------------------------------------------------------------------------- 
 ### Create US DiD Design Matrix ###
 ## ----------------------------------------------------------------------------- 
@@ -223,7 +223,7 @@ SVC DiD Structured Data
 
 We now construct the design matrix and corresponding JAGS input lists for models fit to data generated under the SVC DiD specification.
 
-```{r}
+```{r svcDiD JAGS input lists}
 ## ----------------------------------------------------------------------------- 
 ### Create SVC DiD Design Matrix ###
 ## ----------------------------------------------------------------------------- 
@@ -287,7 +287,7 @@ Fitting the Traditional DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r tDiD model fit to tDiD data, message=FALSE, warning=FALSE, results='hide'}
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
 ## ----------------------------------------------------------------------------- 
@@ -399,7 +399,7 @@ Fitting the US DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r usDiD model fit to tDiD data, message=FALSE, warning=FALSE, results='hide'}
 
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
@@ -523,7 +523,7 @@ Fitting the SVC DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r svcDiD model fit to tDiD data, message=FALSE, warning=FALSE, results='hide'}
 
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
@@ -651,7 +651,7 @@ rownames(cis.tDiD.svc.sub) <- c("beta_0",
 ```
 
 
-```{r include=FALSE}
+```{r creating appendix table A2, include=FALSE}
 
 ###### CODE FOR REPRODUCING APPENDIX TABLE A2 ###### 
 
@@ -723,7 +723,7 @@ Fitting the Traditional DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r tDiD model fit to usDiD data, message=FALSE, warning=FALSE, results='hide'}
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
 ## ----------------------------------------------------------------------------- 
@@ -836,7 +836,7 @@ Fitting the US DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r usDiD model fit to usDiD data, message=FALSE, warning=FALSE, results='hide'}
 
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
@@ -962,7 +962,7 @@ Fitting the SVC DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r svcDiD model fit to usDiD data, message=FALSE, warning=FALSE, results='hide'}
 
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
@@ -1089,7 +1089,7 @@ rownames(cis.us.svc.sub) <- c("beta_0",
 
 ```
 
-```{r include=FALSE}
+```{r creating appendix table A3, include=FALSE}
 
 ###### CODE FOR REPRODUCING APPENDIX TABLE A3 ###### 
 
@@ -1157,7 +1157,7 @@ Fitting the Traditional DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r tDiD model fit to svcDiD data, message=FALSE, warning=FALSE, results='hide'}
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
 ## ----------------------------------------------------------------------------- 
@@ -1269,7 +1269,7 @@ Fitting the Uniform Spatial DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r usDiD model fit to svcDiD data, message=FALSE, warning=FALSE, results='hide'}
 
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
@@ -1393,7 +1393,7 @@ Fitting the SVC DiD Model
 
 </h4>
 
-```{r message=FALSE, warning=FALSE, results='hide'}
+```{r svcDiD model fit to svcDiD data, message=FALSE, warning=FALSE, results='hide'}
 
 ## -----------------------------------------------------------------------------
 ## Set Initial Values ##
@@ -1520,9 +1520,9 @@ rownames(cis.svc.svc.sub) <- c("beta_0",
 
 ```
 
-```{r include=FALSE}
+```{r creating appendix table A4, include=FALSE}
 
-###### CODE FOR REPRODUCING APPENDIX TABLE A3 ###### 
+###### CODE FOR REPRODUCING APPENDIX TABLE A4 ###### 
 
 tdid_ci <- data.frame(parameter = rownames(cis.svc.tDiD.sub), 
                       CrI = make_ci(cis.svc.tDiD.sub))
@@ -1598,7 +1598,7 @@ Traditional DiD Model Performance Evaluation
 </h4>
 
 
-```{r}
+```{r tDiD fit to tDiD data - WAIC calculation}
 ## Calculate WAIC ##
 ## ----------------------------------------------------------------------------- 
 
@@ -1654,7 +1654,7 @@ Uniform Spatial DiD Model Performance Evaluation
 
 </h4>
 
-```{r}
+```{r usDiD fit to tDiD data - WAIC calculation}
 ## Calculate WAIC ##
 ## ----------------------------------------------------------------------------- 
 
@@ -1727,7 +1727,7 @@ SVC DiD Model Performance Evaluation
 
 </h4>
 
-```{r}
+```{r svcDiD fit to tDiD data - WAIC calculation}
 ## Calculate WAIC ##
 ## ----------------------------------------------------------------------------- 
 
@@ -1830,7 +1830,7 @@ Traditional DiD Model Performance Evaluation
 
 </h4>
 
-```{r}
+```{r tDiD fit to usDiD data - WAIC calculation}
 ## Calculate WAIC ##
 ## ----------------------------------------------------------------------------- 
 
@@ -1887,7 +1887,7 @@ Uniform Spatial DiD Model Performance Evaluation
 
 </h4>
 
-```{r}
+```{r usDiD fit to usDiD data - WAIC calculation}
 # get log likelihood matrix #
 
 extract <- as.matrix(combined.uspatial.uspatial)
@@ -1957,7 +1957,7 @@ SVC DiD Model Performance Evaluation
 
 </h4>
 
-```{r}
+```{r svcDiD fit to usDiD data - WAIC calculation}
 ## Calculate WAIC ##
 ## ----------------------------------------------------------------------------- 
 
@@ -2060,7 +2060,7 @@ Traditional DiD Model Performance Evaluation
 
 </h4>
 
-```{r}
+```{r tDiD fit to svcDiD data - WAIC calculation}
 ## Calculate WAIC ##
 ## ----------------------------------------------------------------------------- 
 
@@ -2117,7 +2117,10 @@ Uniform Spatial DiD Model Performance Evaluation
 
 </h4>
 
-```{r}
+```{r usDiD fit to svcDiD data - WAIC calculation}
+## Calculate WAIC ##
+## ----------------------------------------------------------------------------- 
+
 # get log likelihood matrix #
 
 extract <- as.matrix(combined.svc.us)
@@ -2186,9 +2189,11 @@ SVC DiD Model Performance Evaluation
 
 </h4>
 
-```{r}
+```{r svcDiD fit to svcDiD data - WAIC calculation}
 ## Calculate WAIC ##
 ## ----------------------------------------------------------------------------- 
+
+# get log likelihood matrix #
 
 extract <- as.matrix(combined.svc.svc)
 
@@ -2274,7 +2279,7 @@ looic.svc.svc <- waic$estimates["looic", "Estimate"]
 # extract looic value for table
 ```
 
-```{r include=FALSE}
+```{r creating appendix table A1, include=FALSE}
 # Get Values for Table A1
 # Function to compute percent change of one LOOIC value
 # relative to another LOOIC value
@@ -2333,7 +2338,7 @@ Reproducing Table A1
 
 </h3>
 
-```{r}
+```{r printing appendix table A1}
 kable(table_A1_df,
       format = "html",
       booktabs = TRUE,
@@ -2356,7 +2361,7 @@ Reproducing Table A2
 
 Table A2 presents the credible intervals for the parameters estimated by each model when the data are generated from the traditional DiD model. 
 
-```{r echo=FALSE}
+```{r printing appendix table A2, echo=FALSE}
 knitr::kable(table_A2, align = "c", booktabs = TRUE, escape = FALSE) %>%
   kable_styling(full_width = FALSE)
 ```
@@ -2369,7 +2374,7 @@ Reproducing Table A3
 
 Table A3 presents the credible intervals for the parameters estimated by each model when the data are generated from the US DiD model. 
 
-```{r echo=FALSE}
+```{r printing appendix table A3, echo=FALSE}
 knitr::kable(table_A3, align = "c", booktabs = TRUE, escape = FALSE) %>%
   kable_styling(full_width = FALSE)
 ```
@@ -2382,7 +2387,7 @@ Reproducing Table A4
 
 Table A4 presents the credible intervals for the parameters estimated by each model when the data are generated from the SVC DiD model. 
 
-```{r echo=FALSE}
+```{r printing appendix table A4, echo=FALSE}
 knitr::kable(table_A4, align = "c", booktabs = TRUE, escape = FALSE) %>%
   kable_styling(full_width = FALSE)
 ```
