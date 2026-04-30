@@ -1,0 +1,2412 @@
+---
+output: 
+  html_document:
+    df_print: paged
+    css: styles.css
+    toc: true            # turn on a table of contents
+    toc_depth: 3        # include up to H3s
+    toc_float:          # make it a floating, collapsible sidebar
+      collapsed: true
+      smooth_scroll: true
+---
+
+```{r include=FALSE}
+library(tidyverse)
+library(rjags)
+library(coda)
+library(kableExtra)
+library(loo)
+```
+
+<!-- Custom Title Block -->
+
+<h1 style="font-size: 25px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 10px;">
+
+Reproducibility Guide for Spatial DiD Simulation Study
+
+</h1>
+
+<p style="font-size: 25px; color: #444; margin: 0;">
+
+Valentina Arputhasamy
+
+</p>
+
+------------------------------------------------------------------------
+
+<h2 style="font-size: 22px; font-weight: 700; border-bottom: 2px solid #ccc; padding-bottom: 6px; margin-top: 40px;">
+
+Introduction
+
+</h2>
+
+In this guide, we provide a step-by-step overview of the simulation workflow, including data generation, model fitting, and inference. Specifically, we illustrate how the simulation data were generated, how the Traditional DiD, Uniform Spatial DiD (US DiD), and Spatially Varying Coefficient DiD (SVC DiD) models were fit, and how posterior estimates, credible intervals, and model comparisons were obtained.
+
+<h2 style="font-size: 22px; font-weight: 700; border-bottom: 2px solid #ccc; padding-bottom: 6px; margin-top: 40px;">
+
+Simulated Datasets
+
+</h2>
+
+We consider three simulation datasets, each constructed so that the true data-generating process corresponds to one of the models under study. To ensure that the results in this document exactly match those reported in the simulation study of the manuscript, we load the pre-generated datasets and adjacency matrix used in the analysis. For completeness and transparency, we also provide the code used to generate these datasets; however, this code is not executed within this document.
+
+```{r}
+data.tDiD <- read.table("./dgp-cls-homoskedastic/data/simData_clsHomoskedastic.txt", header = T)
+# simulated data generated under the traditional DiD data-generating process
+
+data.usDiD <- read.table("./dgp-us-homoskedastic/data/simData_usHomoskedastic.txt", header = T)
+# simulated data generated under the US DiD data-generating process
+
+data.svcDiD <- read.table("./dgp-svc-homoskedastic/data/simData_svcHomoskedastic.txt", header = T)
+# simulated data generated under the SVC DiD data-generating process
+
+W <- read.table("./dgp-us-homoskedastic/data/adjMatrix_usHomoskedastic.txt") %>% as.matrix()
+# adjacency matrix same across all three models
+```
+
+In the below chunk, we save spatial components required for fitting the US DiD and SVC DiD models.
+
+```{r}
+## ----------------------------------------------------------------------------- 
+### Save Spatial Components ###
+## -----------------------------------------------------------------------------
+
+D <- diag(c(W %*% rep(1, nrow(W)))) 
+# number of neighbors for each county
+phi <- 0.99
+car.precision.unscaled <- D - phi*W
+# unscaled CAR variance
+car.mu <- rep(0, nrow(W))
+# mean vector of car
+
+## Note: These components are saved for the TDiD DGP because we fit the spatial models to this data for model comparison purposes later on.
+
+```
+
+
+<h2 style="font-size: 22px; font-weight: 700; border-bottom: 2px solid #ccc; padding-bottom: 6px; margin-top: 40px;">
+
+Data Preparation for JAGS
+
+</h2>
+
+In this section, we construct the design matrices and corresponding input lists required for JAGS model fitting across all simulation scenarios. These inputs are based on the previously defined datasets and simulation setup.
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Common Model Quantities
+
+</h3>
+
+We first define quantities that are common across all model specifications, including the number of spatial units and total number of observations.
+
+```{r}
+## ----------------------------------------------------------------------------- 
+## Save Some Regression Related Parameters ##
+## ----------------------------------------------------------------------------- 
+c <- nrow(W)
+# number of spatial units
+N <- nrow(data.tDiD)
+# number of observations
+```
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Traditional DiD Structured Data
+
+</h3>
+
+We now construct the design matrix and corresponding JAGS input lists for models fit to data generated under the traditional DiD specification.
+
+```{r}
+## ----------------------------------------------------------------------------- 
+### Create TDiD Design Matrix ###
+## ----------------------------------------------------------------------------- 
+
+X.tDiD <- data.tDiD %>% dplyr::select(-c(region, y))
+q <- ncol(X.tDiD) 
+# number of regression parameters
+## -----------------------------------------------------------------------------
+## Get Lists Ready for Jags ##
+## ----------------------------------------------------------------------------- 
+
+lt.Data.tDiD.tDiD <- list(trt = X.tDiD$treatment, 
+                          time = X.tDiD$time, 
+                          y = data.tDiD$y, 
+                          q = q, 
+                          N = N)
+# quantities needed to fit traditional did model 
+
+lt.Data.tDiD.us <- list(trt = X.tDiD$treatment, 
+                              time = X.tDiD$time, 
+                              y = data.tDiD$y,
+                              q = q, 
+                              N = N, 
+                              car.mu = car.mu, 
+                              car.precision.unscaled = car.precision.unscaled, 
+                              c = c, 
+                              region = data.tDiD$region)
+# quantities needed to fit uniform spatial did model
+
+lt.Data.tDiD.svc <- list(trt = X.tDiD$treatment, 
+                         time = X.tDiD$time, 
+                         y = data.tDiD$y,
+                         q = q, 
+                         N = N, 
+                         car.mu = car.mu, 
+                         car.precision.unscaled = car.precision.unscaled, 
+                         c = c, 
+                         region = data.tDiD$region)
+# quantities needed to fit svc did model
+
+```
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Uniform Spatial DiD Structured Data
+
+</h3>
+
+We now construct the design matrix and corresponding JAGS input lists for models fit to data generated under the US DiD specification.
+
+```{r}
+## ----------------------------------------------------------------------------- 
+### Create US DiD Design Matrix ###
+## ----------------------------------------------------------------------------- 
+
+X.usDiD <- data.usDiD %>% dplyr::select(-c(region, y))
+q <- ncol(X.usDiD) 
+# number of regression parameters
+
+## ----------------------------------------------------------------------------- 
+## Get Lists Ready for Jags ##
+## ----------------------------------------------------------------------------- 
+
+lt.Data.us.tDiD <- list(trt = X.usDiD$treatment, 
+                    time = X.usDiD$time, 
+                    y = data.usDiD$y,
+                    q = q, 
+                    N = N)
+# quantities needed to fit traditional did model
+
+lt.Data.uspatial.uspatial <- list(y = data.usDiD$y, 
+                         trt = X.usDiD$treatment, 
+                         time = X.usDiD$time, 
+                         car.mu = car.mu, 
+                         car.precision.unscaled = car.precision.unscaled, 
+                         q=q, 
+                         N = N,
+                         c = c, 
+                         region = data.usDiD$region)
+
+# quantities needed to fit uniform spatial did model
+
+lt.Data.us.svc <- list(trt = X.usDiD$treatment, 
+                    time = X.usDiD$time, 
+                    y = data.usDiD$y,
+                    q = q, 
+                    N = N, 
+                    car.mu = car.mu, 
+                    car.precision.unscaled = car.precision.unscaled, 
+                    c = c, 
+                    region = data.usDiD$region)
+
+# quantities needed to fit svc did model
+
+```
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+SVC DiD Structured Data
+
+</h3>
+
+We now construct the design matrix and corresponding JAGS input lists for models fit to data generated under the SVC DiD specification.
+
+```{r}
+## ----------------------------------------------------------------------------- 
+### Create SVC DiD Design Matrix ###
+## ----------------------------------------------------------------------------- 
+
+X.svcDiD <- data.svcDiD %>% dplyr::select(-c(region, y))
+q <- ncol(X.svcDiD) 
+# number of regression parameters
+
+## -----------------------------------------------------------------------------
+## Get Lists Ready for Jags ##
+## ----------------------------------------------------------------------------- 
+
+
+lt.Data.svc.tDiD <- list(y = data.svcDiD$y, 
+                     trt = X.svcDiD$treatment, 
+                     time = X.svcDiD$time, 
+                     q = q, 
+                     N = N)
+# quantities needed to fit traditional DiD model
+
+lt.Data.svc.us <- list(y = data.svcDiD$y, 
+                         trt = X.svcDiD$treatment, 
+                         time = X.svcDiD$time, 
+                         car.mu = car.mu, 
+                         car.precision.unscaled = car.precision.unscaled,
+                         q = q, 
+                         N = N, 
+                         c = c, 
+                         region = data.svcDiD$region)
+# quantities needed to fit uniform spatial model
+
+lt.Data.svc.svc <- list(y = data.svcDiD$y, 
+                    trt = X.svcDiD$treatment, 
+                    time = X.svcDiD$time, 
+                    car.mu = car.mu, 
+                    car.precision.unscaled = car.precision.unscaled, 
+                    q=q, 
+                    N = N,
+                    c = c, 
+                    region = data.svcDiD$region)
+# quantities needed to fit svc did model
+```
+
+<h2 style="font-size: 22px; font-weight: 700; border-bottom: 2px solid #ccc; padding-bottom: 6px; margin-top: 40px;">
+
+Model Fitting in JAGS
+
+</h2>
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Traditional DiD Structured Data
+
+</h3>
+
+In this subsection, we fit all three models to the data generated under the traditional DiD modeling framework.
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the Traditional DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = rep(1, times = 1)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 <- rep(1, times = 1)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2)
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 <- rep(1, times = 1)
+
+initial.values.chain.3 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2)
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 10000
+n.chains = 3
+n.adapt = 500
+burnin = 1000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_clsHomoskedastic.txt"
+
+## -----------------------------------------------------------------------------
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.tDiD.tDiD <- jags.model(model.file, 
+                           data = lt.Data.tDiD.tDiD, 
+                           inits = initial.values.all,
+                           n.chains = n.chains, 
+                           n.adapt = n.adapt)
+
+## -----------------------------------------------------------------------------
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+update(m1.tDiD.tDiD, n.iter = burnin)
+m1.out.tDiD.tDiD <- coda.samples(model = m1.tDiD.tDiD, 
+                                 variable.names = model.parameters,
+                                 n.iter = n.samp)
+
+## ----------------------------------------------------------------------------- 
+## Get TDiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.tDiD.tDiD <- do.call(rbind, m1.out.tDiD.tDiD)
+# combined posterior samples
+cis.tDiD.tDiD <- t(apply(combined.tDiD.tDiD, 2, function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.tDiD <- c("beta[1]", 
+               "beta[2]", 
+               "beta[3]", 
+               "beta[4]", 
+               "tausq",
+               "sigsq")
+# parameters to keep for credible interval summary
+
+cis.tDiD.tDiD.sub <- cis.tDiD.tDiD[rownames(cis.tDiD.tDiD) %in% keep.tDiD, ]
+# credible intervals for TDiD column in Table A3
+
+rownames(cis.tDiD.tDiD.sub) <- c("beta_0", 
+                                "beta_1", 
+                                "beta_2", 
+                                "beta_3", 
+                                "tausq")
+
+
+```
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the US DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = rep(1, times = 1)
+sigmasq.inv.init.1 = rep(1, times = 1)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1, 
+                              sigmasq.inv=sigmasq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 = rep(1, times = 1)
+sigmasq.inv.init.2 = rep(1, times = 1)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2, 
+                              sigmasq.inv=sigmasq.inv.init.2) 
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 = rep(1, times = 1)
+sigmasq.inv.init.3 = rep(1, times = 1)
+
+initial.values.chain.3 = list(beta = beta.init.3, 
+                              tausq.inv=tausq.inv.init.3, 
+                              sigmasq.inv=sigmasq.inv.init.3) 
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 30000
+n.chains = 3
+n.adapt = 1500
+burnin = 3000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq", 
+                     "sigmasq.inv", 
+                     "sigsq", 
+                     "omega")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_usHomoskedastic.txt"
+
+## ----------------------------------------------------------------------------- 
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.tDiD.us <- jags.model(model.file, 
+                         data = lt.Data.tDiD.us, 
+                         inits = initial.values.all,
+                         n.chains = n.chains, 
+                         n.adapt = n.adapt)
+
+## ----------------------------------------------------------------------------- 
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+update(m1.tDiD.us, n.iter = burnin)
+m1.out.tDiD.us <- coda.samples(model = m1.tDiD.us, 
+                               variable.names = model.parameters,
+                               n.iter = n.samp)
+# posterior samples separated by chains
+
+## ----------------------------------------------------------------------------- 
+## Get US DiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.tDiD.us <- do.call(rbind, m1.out.tDiD.us)
+# combined posterior samples
+cis.tDiD.us <- t(apply(combined.tDiD.us, 2, function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.us <- c("beta[1]", 
+               "beta[2]", 
+               "beta[3]", 
+               "beta[4]", 
+               "tausq",
+               "sigsq")
+# parameters to keep for credible interval summary
+
+cis.tDiD.us.sub <- cis.tDiD.us[rownames(cis.tDiD.us) %in% keep.us, ]
+# credible intervals for US DiD column in Table A3
+
+rownames(cis.tDiD.us.sub) <- c("beta_0", 
+                                "beta_1", 
+                                "beta_2", 
+                                "beta_3", 
+                                "sigmasq_3",
+                                "tausq")
+
+```
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the SVC DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = 1
+sigmasq.inv.init.1 = rep(1, q)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1, 
+                              sigmasq.inv=sigmasq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 = 1
+sigmasq.inv.init.2 = rep(1, q)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2, 
+                              sigmasq.inv=sigmasq.inv.init.2)
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 = 1
+sigmasq.inv.init.3 = rep(1, q)
+
+initial.values.chain.3 = list(beta = beta.init.3, 
+                              tausq.inv=tausq.inv.init.3, 
+                              sigmasq.inv=sigmasq.inv.init.3)
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 50000
+n.chains = 3
+n.adapt = 2500
+burnin = 5000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq", 
+                     "sigmasq.inv", 
+                     "sigsq", 
+                     "omega0", 
+                     "omega1", 
+                     "omega2", 
+                     "omega3")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_svcHomoskedastic.txt"
+
+## -----------------------------------------------------------------------------
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.tDiD.svc <- jags.model(model.file, 
+                 data = lt.Data.tDiD.svc, 
+                 inits = initial.values.all,
+                 n.chains = n.chains, 
+                 n.adapt = n.adapt)
+
+## -----------------------------------------------------------------------------
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+
+update(m1.tDiD.svc, n.iter = burnin)
+m1.out.tDiD.svc <- coda.samples(model = m1.tDiD.svc, 
+                       variable.names = model.parameters,
+                       n.iter = n.samp)
+
+## ----------------------------------------------------------------------------- 
+## Get SVC DiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.tDiD.svc <- do.call(rbind, m1.out.tDiD.svc)
+# combined posterior samples
+cis.tDiD.svc <- t(apply(combined.tDiD.svc, 2, function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.svc <- c("beta[1]", 
+               "beta[2]", 
+               "beta[3]", 
+               "beta[4]", 
+               "tausq",
+               "sigsq[1]",
+               "sigsq[2]",
+               "sigsq[3]",
+               "sigsq[4]")
+# parameters to keep for credible interval summary
+
+cis.tDiD.svc.sub <- cis.tDiD.svc[rownames(cis.tDiD.svc) %in% keep.svc, ]
+# credible intervals for US DiD column in Table A2
+
+rownames(cis.tDiD.svc.sub) <- c("beta_0", 
+                                "beta_1", 
+                                "beta_2", 
+                                "beta_3", 
+                                "sigmasq_0", 
+                                "sigmasq_1", 
+                                "sigmasq_2", 
+                                "sigmasq_3", 
+                                "tausq")
+
+```
+
+
+```{r include=FALSE}
+
+###### CODE FOR REPRODUCING APPENDIX TABLE A2 ###### 
+
+make_ci <- function(x) {
+  paste0("[", round(x[, "2.5%"], 2), ", ",
+              round(x[, "97.5%"], 2), "]")
+}
+
+tdid_ci <- data.frame(parameter = rownames(cis.tDiD.tDiD.sub), 
+                      CrI = make_ci(cis.tDiD.tDiD.sub))
+us_ci   <- data.frame(parameter = rownames(cis.tDiD.us.sub), 
+                      CrI = make_ci(cis.tDiD.us.sub))
+svc_ci  <- data.frame(parameter = rownames(cis.tDiD.svc.sub), 
+                      CrI = make_ci(cis.tDiD.svc.sub))
+
+param_order <- c(
+  "beta_0",
+  "beta_1",
+  "beta_2",
+  "beta_3",
+  "tausq",
+  "sigmasq_3",
+  "sigmasq_0",
+  "sigmasq_1",
+  "sigmasq_2"
+)
+
+align_ci <- function(df, param_order) {
+  df[match(param_order, df$parameter), ]
+}
+
+tdid_aligned <- align_ci(tdid_ci, param_order)
+us_aligned   <- align_ci(us_ci, param_order)
+svc_aligned  <- align_ci(svc_ci, param_order)
+
+table_A2 <- data.frame(
+  Parameter = param_order,
+  "Traditional DiD" = tdid_aligned$CrI,
+  "USpatial DiD" = us_aligned$CrI,
+  "SVC DiD" = svc_aligned$CrI,
+  "True Value" = c(2, 4, 7, 12, 2, NA, NA, NA, NA),
+  check.names = FALSE
+)
+
+table_A2$Parameter <- c(
+  "\\(\\beta_0\\)",
+  "\\(\\beta_1\\)",
+  "\\(\\beta_2\\)",
+  "\\(\\beta_3\\)",
+  "\\(\\tau^2\\)",
+  "\\(\\sigma^2\\) = \\(\\sigma_3^2\\)",
+  "\\(\\sigma_0^2\\)",
+  "\\(\\sigma_1^2\\)",
+  "\\(\\sigma_2^2\\)"
+)
+```
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Uniform Spatial DiD Structured Data
+
+</h3>
+
+In this subsection, we fit all three models to the data generated under the uniform spatial DiD modeling framework.
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the Traditional DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = rep(1, times = 1)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 <- rep(1, times = 1)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2)
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 <- rep(1, times = 1)
+
+initial.values.chain.3 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2)
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 10000
+n.chains = 3
+n.adapt = 500
+burnin = 1000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_clsHomoskedastic.txt"
+
+## -----------------------------------------------------------------------------
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.us.tDiD <- jags.model(model.file, 
+                           data = lt.Data.us.tDiD, 
+                           inits = initial.values.all,
+                           n.chains = n.chains, 
+                           n.adapt = n.adapt)
+
+## -----------------------------------------------------------------------------
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+update(m1.us.tDiD, n.iter = burnin)
+m1.out.us.tDiD <- coda.samples(model = m1.us.tDiD, 
+                                 variable.names = model.parameters,
+                                 n.iter = n.samp)
+
+## ----------------------------------------------------------------------------- 
+## Get TDiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.us.tDiD <- do.call(rbind, m1.out.us.tDiD)
+# combined posterior samples
+cis.us.tDiD <- t(apply(combined.us.tDiD, 2, function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.tDiD <- c("beta[1]", 
+               "beta[2]", 
+               "beta[3]", 
+               "beta[4]", 
+               "tausq",
+               "sigsq")
+# parameters to keep for credible interval summary
+
+cis.us.tDiD.sub <- cis.us.tDiD[rownames(cis.us.tDiD) %in% keep.tDiD, ]
+# credible intervals for TDiD column in Table A3
+
+rownames(cis.us.tDiD.sub) <- c("beta_0", 
+                                "beta_1", 
+                                "beta_2", 
+                                "beta_3", 
+                                "tausq")
+
+
+```
+
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the US DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = rep(1, times = 1)
+sigmasq.inv.init.1 = rep(1, times = 1)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1, 
+                              sigmasq.inv=sigmasq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 = rep(1, times = 1)
+sigmasq.inv.init.2 = rep(1, times = 1)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2, 
+                              sigmasq.inv=sigmasq.inv.init.2) 
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 = rep(1, times = 1)
+sigmasq.inv.init.3 = rep(1, times = 1)
+
+initial.values.chain.3 = list(beta = beta.init.3, 
+                              tausq.inv=tausq.inv.init.3, 
+                              sigmasq.inv=sigmasq.inv.init.3) 
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 10000
+n.chains = 3
+n.adapt = 500
+burnin = 1000
+
+# n.samp = 30000
+# n.chains = 3
+# n.adapt = 1500
+# burnin = 3000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq", 
+                     "sigmasq.inv", 
+                     "sigsq", 
+                     "omega")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_usHomoskedastic.txt"
+
+## ----------------------------------------------------------------------------- 
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.uspatial.uspatial <- jags.model(model.file, 
+                         data = lt.Data.uspatial.uspatial, 
+                         inits = initial.values.all,
+                         n.chains = n.chains, 
+                         n.adapt = n.adapt)
+
+## ----------------------------------------------------------------------------- 
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+update(m1.uspatial.uspatial, n.iter = burnin)
+m1.out.uspatial.uspatial <- coda.samples(model = m1.uspatial.uspatial, 
+                               variable.names = model.parameters,
+                               n.iter = n.samp)
+# posterior samples separated by chains
+
+## ----------------------------------------------------------------------------- 
+## Get US DiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.uspatial.uspatial <- do.call(rbind, m1.out.uspatial.uspatial)
+# combined posterior samples
+cis.uspatial.uspatial <- t(apply(combined.uspatial.uspatial, 2, 
+                                 function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.us <- c("beta[1]", 
+              "beta[2]", 
+              "beta[3]", 
+              "beta[4]", 
+              "tausq",
+              "sigsq")
+# parameters to keep for credible interval summary
+
+cis.uspatial.uspatial.sub <- cis.uspatial.uspatial[rownames(cis.uspatial.uspatial) 
+                                             %in% keep.us, ]
+# credible intervals for US DiD column in Table A3
+
+rownames(cis.uspatial.uspatial.sub) <- c("beta_0", 
+                                         "beta_1", 
+                                         "beta_2", 
+                                         "beta_3", 
+                                         "sigmasq_3",
+                                         "tausq")
+
+```
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the SVC DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = 1
+sigmasq.inv.init.1 = rep(1, q)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1, 
+                              sigmasq.inv=sigmasq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 = 1
+sigmasq.inv.init.2 = rep(1, q)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2, 
+                              sigmasq.inv=sigmasq.inv.init.2)
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 = 1
+sigmasq.inv.init.3 = rep(1, q)
+
+initial.values.chain.3 = list(beta = beta.init.3, 
+                              tausq.inv=tausq.inv.init.3, 
+                              sigmasq.inv=sigmasq.inv.init.3)
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 20000
+n.chains = 3
+n.adapt = 500
+burnin = 1000
+
+# n.samp = 50000
+# n.chains = 3
+# n.adapt = 2500
+# burnin = 5000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq", 
+                     "sigmasq.inv", 
+                     "sigsq", 
+                     "omega0", 
+                     "omega1", 
+                     "omega2", 
+                     "omega3")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_svcHomoskedastic.txt"
+
+## -----------------------------------------------------------------------------
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.us.svc <- jags.model(model.file, 
+                 data = lt.Data.us.svc, 
+                 inits = initial.values.all,
+                 n.chains = n.chains, 
+                 n.adapt = n.adapt)
+
+## -----------------------------------------------------------------------------
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+
+update(m1.us.svc, n.iter = burnin)
+m1.out.us.svc <- coda.samples(model = m1.us.svc, 
+                       variable.names = model.parameters,
+                       n.iter = n.samp)
+
+## ----------------------------------------------------------------------------- 
+## Get SVC DiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.us.svc <- do.call(rbind, m1.out.us.svc)
+# combined posterior samples
+cis.us.svc <- t(apply(combined.us.svc, 2, function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.svc <- c("beta[1]", 
+               "beta[2]", 
+               "beta[3]", 
+               "beta[4]", 
+               "tausq",
+               "sigsq[1]",
+               "sigsq[2]",
+               "sigsq[3]",
+               "sigsq[4]")
+# parameters to keep for credible interval summary
+
+cis.us.svc.sub <- cis.us.svc[rownames(cis.us.svc) %in% keep.svc, ]
+# credible intervals for US DiD column in Table A2
+
+rownames(cis.us.svc.sub) <- c("beta_0", 
+                                "beta_1", 
+                                "beta_2", 
+                                "beta_3", 
+                                "sigmasq_0", 
+                                "sigmasq_1", 
+                                "sigmasq_2",
+                                "sigmasq_3", 
+                                "tausq")
+
+```
+
+```{r include=FALSE}
+
+###### CODE FOR REPRODUCING APPENDIX TABLE A3 ###### 
+
+tdid_ci <- data.frame(parameter = rownames(cis.us.tDiD.sub), 
+                      CrI = make_ci(cis.us.tDiD.sub))
+us_ci   <- data.frame(parameter = rownames(cis.uspatial.uspatial.sub), 
+                      CrI = make_ci(cis.uspatial.uspatial.sub))
+svc_ci  <- data.frame(parameter = rownames(cis.us.svc.sub), 
+                      CrI = make_ci(cis.us.svc.sub))
+
+param_order <- c(
+  "beta_0",
+  "beta_1",
+  "beta_2",
+  "beta_3",
+  "tausq",
+  "sigmasq_3",
+  "sigmasq_0",
+  "sigmasq_1",
+  "sigmasq_2"
+)
+
+align_ci <- function(df, param_order) {
+  df[match(param_order, df$parameter), ]
+}
+
+tdid_aligned <- align_ci(tdid_ci, param_order)
+us_aligned   <- align_ci(us_ci, param_order)
+svc_aligned  <- align_ci(svc_ci, param_order)
+
+table_A3 <- data.frame(
+  Parameter = param_order,
+  "Traditional DiD" = tdid_aligned$CrI,
+  "USpatial DiD" = us_aligned$CrI,
+  "SVC DiD" = svc_aligned$CrI,
+  "True Value" = c(2, 4, 7, 12, 2, 4, NA, NA, NA),
+  check.names = FALSE
+)
+
+table_A3$Parameter <- c(
+  "\\(\\beta_0\\)",
+  "\\(\\beta_1\\)",
+  "\\(\\beta_2\\)",
+  "\\(\\beta_3\\)",
+  "\\(\\tau^2\\)",
+  "\\(\\sigma^2\\) = \\(\\sigma_3^2\\)",
+  "\\(\\sigma_0^2\\)",
+  "\\(\\sigma_1^2\\)",
+  "\\(\\sigma_2^2\\)"
+)
+```
+
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+SVC DiD Structured Data
+
+</h3>
+
+In this subsection, we fit all three models to the data generated under the SVC DiD modeling framework.
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the Traditional DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = rep(1, times = 1)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 <- rep(1, times = 1)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2)
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 <- rep(1, times = 1)
+
+initial.values.chain.3 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2)
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 10000
+n.chains = 3
+n.adapt = 500
+burnin = 1000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_clsHomoskedastic.txt"
+
+## -----------------------------------------------------------------------------
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.svc.tDiD <- jags.model(model.file, 
+                           data = lt.Data.svc.tDiD, 
+                           inits = initial.values.all,
+                           n.chains = n.chains, 
+                           n.adapt = n.adapt)
+
+## -----------------------------------------------------------------------------
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+update(m1.svc.tDiD, n.iter = burnin)
+m1.out.svc.tDiD <- coda.samples(model = m1.svc.tDiD, 
+                                 variable.names = model.parameters,
+                                 n.iter = n.samp)
+
+## ----------------------------------------------------------------------------- 
+## Get TDiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.svc.tDiD <- do.call(rbind, m1.out.svc.tDiD)
+# combined posterior samples
+cis.svc.tDiD <- t(apply(combined.svc.tDiD, 2, function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.tDiD <- c("beta[1]", 
+               "beta[2]", 
+               "beta[3]", 
+               "beta[4]", 
+               "tausq",
+               "sigsq")
+# parameters to keep for credible interval summary
+
+cis.svc.tDiD.sub <- cis.svc.tDiD[rownames(cis.svc.tDiD) %in% keep.tDiD, ]
+# credible intervals for TDiD column in Table A4
+
+rownames(cis.svc.tDiD.sub) <- c("beta_0", 
+                                "beta_1", 
+                                "beta_2", 
+                                "beta_3", 
+                                "tausq")
+
+
+```
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the Uniform Spatial DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = rep(1, times = 1)
+sigmasq.inv.init.1 = rep(1, times = 1)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1, 
+                              sigmasq.inv=sigmasq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 = rep(1, times = 1)
+sigmasq.inv.init.2 = rep(1, times = 1)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2, 
+                              sigmasq.inv=sigmasq.inv.init.2) 
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 = rep(1, times = 1)
+sigmasq.inv.init.3 = rep(1, times = 1)
+
+initial.values.chain.3 = list(beta = beta.init.3, 
+                              tausq.inv=tausq.inv.init.3, 
+                              sigmasq.inv=sigmasq.inv.init.3) 
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 10000
+n.chains = 3
+n.adapt = 500
+burnin = 1000
+
+# n.samp = 30000
+# n.chains = 3
+# n.adapt = 1500
+# burnin = 3000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq", 
+                     "sigmasq.inv", 
+                     "sigsq", 
+                     "omega")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_usHomoskedastic.txt"
+
+## ----------------------------------------------------------------------------- 
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.svc.us <- jags.model(model.file, 
+                         data = lt.Data.svc.us, 
+                         inits = initial.values.all,
+                         n.chains = n.chains, 
+                         n.adapt = n.adapt)
+
+## ----------------------------------------------------------------------------- 
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+update(m1.svc.us, n.iter = burnin)
+m1.out.svc.us <- coda.samples(model = m1.svc.us, 
+                               variable.names = model.parameters,
+                               n.iter = n.samp)
+# posterior samples separated by chains
+
+## ----------------------------------------------------------------------------- 
+## Get US DiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.svc.us <- do.call(rbind, m1.out.svc.us)
+# combined posterior samples
+cis.svc.us <- t(apply(combined.svc.us, 2, function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.us <- c("beta[1]", 
+               "beta[2]", 
+               "beta[3]", 
+               "beta[4]", 
+               "tausq",
+               "sigsq")
+# parameters to keep for credible interval summary
+
+cis.svc.us.sub <- cis.tDiD.us[rownames(cis.svc.us) %in% keep.us, ]
+# credible intervals for US DiD column in Table A3
+
+rownames(cis.svc.us.sub) <- c("beta_0", 
+                                "beta_1", 
+                                "beta_2", 
+                                "beta_3", 
+                                "sigmasq_3",
+                                "tausq")
+
+```
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Fitting the SVC DiD Model
+
+</h4>
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+## -----------------------------------------------------------------------------
+## Set Initial Values ##
+## ----------------------------------------------------------------------------- 
+
+## set initial values for chain 1 ## 
+
+beta.init.1 = rnorm(q, 0, 0.01)
+tausq.inv.init.1 = 1
+sigmasq.inv.init.1 = rep(1, q)
+
+initial.values.chain.1 = list(beta = beta.init.1, 
+                              tausq.inv=tausq.inv.init.1, 
+                              sigmasq.inv=sigmasq.inv.init.1) 
+
+## set initial values for chain 2 ## 
+
+beta.init.2 = rnorm(q, 0, 0.01)
+tausq.inv.init.2 = 1
+sigmasq.inv.init.2 = rep(1, q)
+
+initial.values.chain.2 = list(beta = beta.init.2, 
+                              tausq.inv=tausq.inv.init.2, 
+                              sigmasq.inv=sigmasq.inv.init.2)
+
+## set initial values for chain 3 ## 
+
+beta.init.3 = rnorm(q, 0, 0.01)
+tausq.inv.init.3 = 1
+sigmasq.inv.init.3 = rep(1, q)
+
+initial.values.chain.3 = list(beta = beta.init.3, 
+                              tausq.inv=tausq.inv.init.3, 
+                              sigmasq.inv=sigmasq.inv.init.3)
+
+## combine initial values into a single list ##
+
+initial.values.all = list(initial.values.chain.1, 
+                          initial.values.chain.2,
+                          initial.values.chain.3)
+
+## -----------------------------------------------------------------------------
+## Set MCMC Settings ##
+## ----------------------------------------------------------------------------- 
+
+n.samp = 20000
+n.chains = 3
+n.adapt = 500
+burnin = 1000
+
+# n.samp = 50000
+# n.chains = 3
+# n.adapt = 2500
+# burnin = 5000
+
+## -----------------------------------------------------------------------------
+## Assign Monitored Parameters ##
+## ----------------------------------------------------------------------------- 
+
+model.parameters = c("beta", 
+                     "tausq.inv", 
+                     "tausq", 
+                     "sigmasq.inv", 
+                     "sigsq", 
+                     "omega0", 
+                     "omega1", 
+                     "omega2", 
+                     "omega3")
+
+## -----------------------------------------------------------------------------
+## Load in Model File ##
+## ----------------------------------------------------------------------------- 
+
+model.file <- "./dgp-cls-homoskedastic/src/modelFile_svcHomoskedastic.txt"
+
+## -----------------------------------------------------------------------------
+## Compile Model ##
+## ----------------------------------------------------------------------------- 
+
+m1.svc.svc <- jags.model(model.file, 
+                 data = lt.Data.svc.svc, 
+                 inits = initial.values.all,
+                 n.chains = n.chains, 
+                 n.adapt = n.adapt)
+
+## -----------------------------------------------------------------------------
+## Posterior Sampling ##
+## ----------------------------------------------------------------------------- 
+
+set.seed(327)
+
+update(m1.svc.svc, n.iter = burnin)
+m1.out.svc.svc <- coda.samples(model = m1.svc.svc, 
+                       variable.names = model.parameters,
+                       n.iter = n.samp)
+
+## ----------------------------------------------------------------------------- 
+## Get SVC DiD Credible Intervals for Table A3
+## ----------------------------------------------------------------------------- 
+
+combined.svc.svc <- do.call(rbind, m1.out.svc.svc)
+# combined posterior samples
+cis.svc.svc <- t(apply(combined.svc.svc, 2, function(x) quantile(x, c(0.5, 0.025, 0.975))))
+# credible intervals
+
+keep.svc <- c("beta[1]", 
+               "beta[2]", 
+               "beta[3]", 
+               "beta[4]", 
+               "tausq",
+               "sigsq[1]",
+               "sigsq[2]",
+               "sigsq[3]",
+               "sigsq[4]")
+# parameters to keep for credible interval summary
+
+cis.svc.svc.sub <- cis.svc.svc[rownames(cis.svc.svc) %in% keep.svc, ]
+# credible intervals for US DiD column in Table A2
+
+rownames(cis.svc.svc.sub) <- c("beta_0", 
+                                "beta_1", 
+                                "beta_2", 
+                                "beta_3", 
+                                "sigmasq_0", 
+                                "sigmasq_1", 
+                                "sigmasq_2",
+                                "sigmasq_3", 
+                                "tausq")
+
+```
+
+```{r include=FALSE}
+
+###### CODE FOR REPRODUCING APPENDIX TABLE A3 ###### 
+
+tdid_ci <- data.frame(parameter = rownames(cis.svc.tDiD.sub), 
+                      CrI = make_ci(cis.svc.tDiD.sub))
+us_ci   <- data.frame(parameter = rownames(cis.svc.us.sub), 
+                      CrI = make_ci(cis.svc.us.sub))
+svc_ci  <- data.frame(parameter = rownames(cis.svc.svc.sub), 
+                      CrI = make_ci(cis.svc.svc.sub))
+
+param_order <- c(
+  "beta_0",
+  "beta_1",
+  "beta_2",
+  "beta_3",
+  "tausq",
+  "sigmasq_3",
+  "sigmasq_0",
+  "sigmasq_1",
+  "sigmasq_2"
+)
+
+align_ci <- function(df, param_order) {
+  df[match(param_order, df$parameter), ]
+}
+
+tdid_aligned <- align_ci(tdid_ci, param_order)
+us_aligned   <- align_ci(us_ci, param_order)
+svc_aligned  <- align_ci(svc_ci, param_order)
+
+table_A4 <- data.frame(
+  Parameter = param_order,
+  "Traditional DiD" = tdid_aligned$CrI,
+  "USpatial DiD" = us_aligned$CrI,
+  "SVC DiD" = svc_aligned$CrI,
+  "True Value" = c(2, 4, 7, 12, 2, 4, 2, 3, 5),
+  check.names = FALSE
+)
+
+table_A4$Parameter <- c(
+  "\\(\\beta_0\\)",
+  "\\(\\beta_1\\)",
+  "\\(\\beta_2\\)",
+  "\\(\\beta_3\\)",
+  "\\(\\tau^2\\)",
+  "\\(\\sigma^2\\) = \\(\\sigma_3^2\\)",
+  "\\(\\sigma_0^2\\)",
+  "\\(\\sigma_1^2\\)",
+  "\\(\\sigma_2^2\\)"
+)
+```
+
+
+<h2 style="font-size: 22px; font-weight: 700; border-bottom: 2px solid #ccc; padding-bottom: 6px; margin-top: 40px;">
+
+Model Performance
+
+</h2>
+
+In our paper, WAIC was used evaluate the performance of each model. In this section, we provide the code used to compare the performance of each model fit to each simulated dataset.
+
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Traditional DiD Structured Data
+
+</h3>
+
+In this subsection, we use the `loo()` function from `loo` package to evaluate the model performance of all three models when fit to data generated under the traditional DiD modeling framework.
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Traditional DiD Model Performance Evaluation
+
+</h4>
+
+
+```{r}
+## Calculate WAIC ##
+## ----------------------------------------------------------------------------- 
+
+## get log-likelihood matrix ##
+
+extract <- as.matrix(combined.tDiD.tDiD)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+treatXtime <- as.numeric(data.tDiD$time) * as.numeric(data.tDiD$treatment)
+
+mu <- sapply(seq_along(data.tDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.tDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.tDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+## extract tausqs ##
+
+tausq.df <- extract[, "tausq"]
+
+## create log likelihood calculation function ##
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+## create empty log-likelihood matrix ##
+
+log.likelihood.mat <- matrix(nrow = nrow(extract), ncol = length(data.tDiD$y))
+
+## calculate log-likelihoods ##
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.tDiD$y, mu[i, ], tausq.df[i])
+}))
+
+## use log-likelihood to calculate waic ##
+
+waic <- loo(log.likelihood.mat)
+# obtain WAIC
+looic.tDiD.tDiD <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Uniform Spatial DiD Model Performance Evaluation
+
+</h4>
+
+```{r}
+## Calculate WAIC ##
+## ----------------------------------------------------------------------------- 
+
+# get log likelihood matrix #
+
+extract <- as.matrix(combined.tDiD.us)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+omega.df <- extract[, colnames(extract)[grep("omega", colnames(extract))]]
+
+treatXtime <- as.numeric(data.tDiD$time) * as.numeric(data.tDiD$treatment)
+
+fixed.mu <- sapply(seq_along(data.tDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.tDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.tDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+
+# function to compute random component of mu
+
+compute.random.mu <- function(i, region, cov) {
+  # Vectorized multiplication for each row `i`
+  omega.df[i, region] * cov
+}
+
+# apply the function across all rows using sapply
+random.mu <- t(sapply(seq_len(nrow(beta.df)), 
+                      function(i) compute.random.mu(i, data.tDiD$region,
+                                                    treatXtime)))
+
+total.mu <- fixed.mu + random.mu
+
+# extract tausqs
+
+tausq.df <- extract[, "tausq"]
+
+# create log likelihood calculation function
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+# create Empty Log-Likelihood Matrix
+
+log.likelihood.mat <- matrix(nrow = nrow(extract), ncol = length(data.tDiD$y))
+
+# calculate Log likelihoods
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.tDiD$y, total.mu[i, ], tausq.df[i])
+}))
+
+# use log-likelihood to calculate waic
+
+waic <- loo(log.likelihood.mat)
+looic.tDiD.us <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+SVC DiD Model Performance Evaluation
+
+</h4>
+
+```{r}
+## Calculate WAIC ##
+## ----------------------------------------------------------------------------- 
+
+extract <- as.matrix(combined.tDiD.svc)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+omega.df <- extract[, colnames(extract)[grep("omega", colnames(extract))]]
+
+## separate each of the omega effects into 4 dataframes ##
+
+omega0.indices <- grep("^omega0\\[", colnames(omega.df))
+omega0.df <- omega.df[, omega0.indices]
+
+omega1.indices <- grep("^omega1\\[", colnames(omega.df))
+omega1.df <- omega.df[, omega1.indices]
+
+omega2.indices <- grep("^omega2\\[", colnames(omega.df))
+omega2.df <- omega.df[, omega2.indices]
+
+omega3.indices <- grep("^omega3\\[", colnames(omega.df))
+omega3.df <- omega.df[, omega3.indices]
+
+## calculate treatxtime ##
+
+treatXtime <- data.tDiD$time * data.tDiD$treatment
+
+## calculate fixed mu component ##
+
+fixed.mu <- sapply(seq_along(data.tDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.tDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.tDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+## calculate spatial/random mu components ##
+
+# create function for calculating spatial components
+
+compute.random.mu <- function(i, region.vec, omega0, omega1, omega2, omega3, 
+                              treat, time, treatxtime) {
+  
+  # Vectorized multiplication for each row `i`
+  
+  omega0[i, region.vec] + 
+    omega1[i, region.vec]*treat + 
+    omega2[i, region.vec]*time +
+    omega3[i, region.vec]*treatxtime
+}
+
+random.mu <- t(sapply(seq_len(nrow(omega.df)), function(i){
+  
+  compute.random.mu(i, data.tDiD$region, omega0.df, omega1.df, omega2.df, 
+                    omega3.df, data.tDiD$treatment, data.tDiD$time, treatXtime)
+  
+}))
+
+# combine the components #
+
+total.mu <- fixed.mu + random.mu
+
+# Extract tausqs
+
+tausq.df <- extract[, "tausq"]
+
+# Create log likelihood calculation function
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+# Calculate Log likelihoods
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.tDiD$y, total.mu[i, ], tausq.df[i])
+}))
+
+
+waic <- loo(log.likelihood.mat)
+looic.tDiD.svc <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Uniform Spatial DiD Structured Data
+
+</h3>
+
+In this subsection, we use the `loo()` function from `loo` package to evaluate the model performance of all three models when fit to data generated under the US DiD modeling framework.
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Traditional DiD Model Performance Evaluation
+
+</h4>
+
+```{r}
+## Calculate WAIC ##
+## ----------------------------------------------------------------------------- 
+
+## get log-likelihood matrix ##
+
+extract <- as.matrix(combined.us.tDiD)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+treatXtime <- as.numeric(data.usDiD$time) * as.numeric(data.usDiD$treatment)
+
+mu <- sapply(seq_along(data.usDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.usDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.usDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+## extract tausqs ##
+
+tausq.df <- extract[, "tausq"]
+
+## create log likelihood calculation function ##
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+## create empty log-likelihood matrix ##
+
+log.likelihood.mat <- matrix(nrow = nrow(extract), ncol = length(data.usDiD$y))
+
+## calculate log-likelihoods ##
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.usDiD$y, mu[i, ], tausq.df[i])
+}))
+
+## use log-likelihood to calculate waic ##
+
+waic <- loo(log.likelihood.mat)
+# obtain WAIC
+looic.us.tDiD <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Uniform Spatial DiD Model Performance Evaluation
+
+</h4>
+
+```{r}
+# get log likelihood matrix #
+
+extract <- as.matrix(combined.uspatial.uspatial)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+omega.df <- extract[, colnames(extract)[grep("omega", colnames(extract))]]
+
+treatXtime <- as.numeric(data.usDiD$time) * as.numeric(data.usDiD$treatment)
+
+fixed.mu <- sapply(seq_along(data.usDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.usDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.usDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+
+# function to compute random component of mu
+
+compute.random.mu <- function(i, region, cov) {
+  # Vectorized multiplication for each row `i`
+  omega.df[i, region] * cov
+}
+
+# apply the function across all rows using sapply
+random.mu <- t(sapply(seq_len(nrow(beta.df)), 
+                      function(i) compute.random.mu(i, data.usDiD$region,
+                                                    treatXtime)))
+
+total.mu <- fixed.mu + random.mu
+
+# extract tausqs
+
+tausq.df <- extract[, "tausq"]
+
+# create log likelihood calculation function
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+# create Empty Log-Likelihood Matrix
+
+log.likelihood.mat <- matrix(nrow = nrow(extract), ncol = length(data.usDiD$y))
+
+# calculate Log likelihoods
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.usDiD$y, total.mu[i, ], tausq.df[i])
+}))
+
+# use log-likelihood to calculate waic
+
+waic <- loo(log.likelihood.mat)
+looic.us.us <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+SVC DiD Model Performance Evaluation
+
+</h4>
+
+```{r}
+## Calculate WAIC ##
+## ----------------------------------------------------------------------------- 
+
+extract <- as.matrix(combined.us.svc)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+omega.df <- extract[, colnames(extract)[grep("omega", colnames(extract))]]
+
+## separate each of the omega effects into 4 dataframes ##
+
+omega0.indices <- grep("^omega0\\[", colnames(omega.df))
+omega0.df <- omega.df[, omega0.indices]
+
+omega1.indices <- grep("^omega1\\[", colnames(omega.df))
+omega1.df <- omega.df[, omega1.indices]
+
+omega2.indices <- grep("^omega2\\[", colnames(omega.df))
+omega2.df <- omega.df[, omega2.indices]
+
+omega3.indices <- grep("^omega3\\[", colnames(omega.df))
+omega3.df <- omega.df[, omega3.indices]
+
+## calculate treatxtime ##
+
+treatXtime <- data.usDiD$time * data.usDiD$treatment
+
+## calculate fixed mu component ##
+
+fixed.mu <- sapply(seq_along(data.usDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.usDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.usDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+## calculate spatial/random mu components ##
+
+# create function for calculating spatial components
+
+compute.random.mu <- function(i, region.vec, omega0, omega1, omega2, omega3, 
+                              treat, time, treatxtime) {
+  
+  # Vectorized multiplication for each row `i`
+  
+  omega0[i, region.vec] + 
+    omega1[i, region.vec]*treat + 
+    omega2[i, region.vec]*time +
+    omega3[i, region.vec]*treatxtime
+}
+
+random.mu <- t(sapply(seq_len(nrow(omega.df)), function(i){
+  
+  compute.random.mu(i, data.usDiD$region, omega0.df, omega1.df, omega2.df, 
+                    omega3.df, data.usDiD$treatment, data.usDiD$time, treatXtime)
+  
+}))
+
+# combine the components #
+
+total.mu <- fixed.mu + random.mu
+
+# Extract tausqs
+
+tausq.df <- extract[, "tausq"]
+
+# Create log likelihood calculation function
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+# Calculate Log likelihoods
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.usDiD$y, total.mu[i, ], tausq.df[i])
+}))
+
+
+waic <- loo(log.likelihood.mat)
+looic.us.svc <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+SVC DiD Structured Data
+
+</h3>
+
+In this subsection, we use the `loo()` function from `loo` package to evaluate the model performance of all three models when fit to data generated under the SVC DiD modeling framework.
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Traditional DiD Model Performance Evaluation
+
+</h4>
+
+```{r}
+## Calculate WAIC ##
+## ----------------------------------------------------------------------------- 
+
+## get log-likelihood matrix ##
+
+extract <- as.matrix(combined.svc.tDiD)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+treatXtime <- as.numeric(data.svcDiD$time) * as.numeric(data.svcDiD$treatment)
+
+mu <- sapply(seq_along(data.svcDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.svcDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.svcDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+## extract tausqs ##
+
+tausq.df <- extract[, "tausq"]
+
+## create log likelihood calculation function ##
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+## create empty log-likelihood matrix ##
+
+log.likelihood.mat <- matrix(nrow = nrow(extract), ncol = length(data.svcDiD$y))
+
+## calculate log-likelihoods ##
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.svcDiD$y, mu[i, ], tausq.df[i])
+}))
+
+## use log-likelihood to calculate waic ##
+
+waic <- loo(log.likelihood.mat)
+# obtain WAIC
+looic.svc.tDiD <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+Uniform Spatial DiD Model Performance Evaluation
+
+</h4>
+
+```{r}
+# get log likelihood matrix #
+
+extract <- as.matrix(combined.svc.us)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+omega.df <- extract[, colnames(extract)[grep("omega", colnames(extract))]]
+
+treatXtime <- as.numeric(data.svcDiD$time) * as.numeric(data.svcDiD$treatment)
+
+fixed.mu <- sapply(seq_along(data.svcDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.svcDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.svcDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+
+# function to compute random component of mu
+
+compute.random.mu <- function(i, region, cov) {
+  # Vectorized multiplication for each row `i`
+  omega.df[i, region] * cov
+}
+
+# apply the function across all rows using sapply
+random.mu <- t(sapply(seq_len(nrow(beta.df)), 
+                      function(i) compute.random.mu(i, data.svcDiD$region,
+                                                    treatXtime)))
+
+total.mu <- fixed.mu + random.mu
+
+# extract tausqs
+
+tausq.df <- extract[, "tausq"]
+
+# create log likelihood calculation function
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+# create Empty Log-Likelihood Matrix
+
+log.likelihood.mat <- matrix(nrow = nrow(extract), ncol = length(data.svcDiD$y))
+
+# calculate Log likelihoods
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.svcDiD$y, total.mu[i, ], tausq.df[i])
+}))
+
+# use log-likelihood to calculate waic
+
+waic <- loo(log.likelihood.mat)
+looic.svc.us <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+<h4 style="font-size: 18px; font-weight: 500; border-bottom: 1px dashed #ddd; padding-bottom: 4px; margin-top: 15px;">
+
+SVC DiD Model Performance Evaluation
+
+</h4>
+
+```{r}
+## Calculate WAIC ##
+## ----------------------------------------------------------------------------- 
+
+extract <- as.matrix(combined.svc.svc)
+
+beta.df <- as.data.frame(extract[, 
+                                 colnames(extract)[grep("beta", 
+                                                        colnames(extract))]])
+colnames(beta.df) <- c("beta0", "beta1", "beta2", "beta3")
+
+omega.df <- extract[, colnames(extract)[grep("omega", colnames(extract))]]
+
+## separate each of the omega effects into 4 dataframes ##
+
+omega0.indices <- grep("^omega0\\[", colnames(omega.df))
+omega0.df <- omega.df[, omega0.indices]
+
+omega1.indices <- grep("^omega1\\[", colnames(omega.df))
+omega1.df <- omega.df[, omega1.indices]
+
+omega2.indices <- grep("^omega2\\[", colnames(omega.df))
+omega2.df <- omega.df[, omega2.indices]
+
+omega3.indices <- grep("^omega3\\[", colnames(omega.df))
+omega3.df <- omega.df[, omega3.indices]
+
+## calculate treatxtime ##
+
+treatXtime <- data.svcDiD$time * data.svcDiD$treatment
+
+## calculate fixed mu component ##
+
+fixed.mu <- sapply(seq_along(data.svcDiD$treatment), function(x) 
+  beta.df$beta0 + beta.df$beta1 * as.numeric(data.svcDiD$treatment[x]) + 
+    beta.df$beta2 * as.numeric(data.svcDiD$time[x]) + beta.df$beta3 * 
+    as.numeric(treatXtime[x]))
+
+## calculate spatial/random mu components ##
+
+# create function for calculating spatial components
+
+compute.random.mu <- function(i, region.vec, omega0, omega1, omega2, omega3, 
+                              treat, time, treatxtime) {
+  
+  # Vectorized multiplication for each row `i`
+  
+  omega0[i, region.vec] + 
+    omega1[i, region.vec]*treat + 
+    omega2[i, region.vec]*time +
+    omega3[i, region.vec]*treatxtime
+}
+
+random.mu <- t(sapply(seq_len(nrow(omega.df)), function(i){
+  
+  compute.random.mu(i, data.svcDiD$region, omega0.df, omega1.df, omega2.df, 
+                    omega3.df, data.svcDiD$treatment, data.svcDiD$time, treatXtime)
+  
+}))
+
+# combine the components #
+
+total.mu <- fixed.mu + random.mu
+
+# Extract tausqs
+
+tausq.df <- extract[, "tausq"]
+
+# Create log likelihood calculation function
+
+calc.log.likelihood <- function(y, mu, tausq){
+  
+  dnorm(y, mu, sqrt(tausq), log = T)
+}
+
+# Calculate Log likelihoods
+
+log.likelihood.mat <- t(sapply(seq_len(nrow(beta.df)), function(i){
+  
+  calc.log.likelihood(data.svcDiD$y, total.mu[i, ], tausq.df[i])
+}))
+
+
+waic <- loo(log.likelihood.mat)
+looic.svc.svc <- waic$estimates["looic", "Estimate"] 
+# extract looic value for table
+```
+
+```{r include=FALSE}
+# Get Values for Table A1
+# Function to compute percent change of one LOOIC value
+# relative to another LOOIC value
+
+percent_change_looic <- function(value, reference, digits = 2) {
+  
+  pct_change <- ((value - reference) / reference) * 100
+  
+  round(pct_change, digits)
+}
+
+## TDID STRUCTURED DATA ##
+pchange.tDiD.us <- percent_change_looic(looic.tDiD.us, looic.tDiD.tDiD)
+# US DiD
+pchange.tDiD.svc <- percent_change_looic(looic.tDiD.svc, looic.tDiD.tDiD)
+# SVC DiD
+
+## US DID STRUCTURED DATA ##
+pchange.us.tDiD <- percent_change_looic(looic.us.tDiD, looic.us.us)
+# TDID 
+pchange.us.svc <- percent_change_looic(looic.us.svc, looic.us.us)
+# SVC DiD
+
+## SVC DID STRUCTURED DATA ##
+pchange.svc.tDiD <- percent_change_looic(looic.svc.tDiD, looic.svc.svc)
+# TDID 
+pchange.svc.us <- percent_change_looic(looic.svc.us, looic.svc.svc)
+# US DiD
+
+# create and save table
+row1 <- c("", "", "Fitted Model", "")
+row2 <- c("True Model", "", "", "")
+row3 <- c("", "Traditional DiD", "Uniform Spatial DiD", "SVC DiD")
+row4 <- c("Traditional DiD", "—", paste0("+", pchange.tDiD.us, "%"), paste0("+", pchange.tDiD.svc, "%")) 
+row5 <- c("Uniform Spatial DiD", paste0("+", pchange.us.tDiD, "%"), "—", paste0("+", pchange.us.svc, "%"))
+row6 <- c("SVC DiD", paste0("+", pchange.svc.tDiD, "%"), paste0("+", pchange.svc.us, "%"), "—")
+
+table_A1 <- matrix(NA, nrow = 6, ncol = 4)
+table_A1 <- rbind(row1, row2, row3, row4, row5, row6)
+rownames(table_A1) <- NULL
+table_A1_df <- as.data.frame(table_A1)
+colnames(table_A1_df) <- NULL
+```
+
+<h2 style="font-size: 22px; font-weight: 700; border-bottom: 2px solid #ccc; padding-bottom: 6px; margin-top: 40px;">
+
+Tables
+
+</h2>
+
+In this section, we use posterior samples obtained from each of the nine models fit above to reproduce the tables provided in the Appendix. It is important to note that the estimates in these tables are based on a different set of posterior samples than those used in the main paper; therefore, minor discrepancies due to Monte Carlo error are expected.
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Reproducing Table A1
+
+</h3>
+
+```{r}
+kable(table_A1_df,
+      format = "html",
+      booktabs = TRUE,
+      align = "c") %>%
+  kable_styling(latex_options = "hold_position") %>%
+  row_spec(1, extra_latex_after = "\\\\hline") %>%
+  row_spec(2, extra_latex_after = "\\\\hline") %>%
+  row_spec(3, extra_latex_after = "\\\\hline") %>% 
+  row_spec(1, bold = TRUE) %>%
+  row_spec(2, bold = TRUE) %>%
+  row_spec(3, bold = TRUE)
+```
+
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Reproducing Table A2
+
+</h3>
+
+Table A2 presents the credible intervals for the parameters estimated by each model when the data are generated from the traditional DiD model. 
+
+```{r echo=FALSE}
+knitr::kable(table_A2, align = "c", booktabs = TRUE, escape = FALSE) %>%
+  kable_styling(full_width = FALSE)
+```
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Reproducing Table A3
+
+</h3>
+
+Table A3 presents the credible intervals for the parameters estimated by each model when the data are generated from the US DiD model. 
+
+```{r echo=FALSE}
+knitr::kable(table_A3, align = "c", booktabs = TRUE, escape = FALSE) %>%
+  kable_styling(full_width = FALSE)
+```
+
+<h3 style="font-size: 20px; font-weight: 500; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 20px;">
+
+Reproducing Table A4
+
+</h3>
+
+Table A4 presents the credible intervals for the parameters estimated by each model when the data are generated from the SVC DiD model. 
+
+```{r echo=FALSE}
+knitr::kable(table_A4, align = "c", booktabs = TRUE, escape = FALSE) %>%
+  kable_styling(full_width = FALSE)
+```
+
+
+
+
