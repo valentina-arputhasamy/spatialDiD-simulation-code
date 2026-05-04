@@ -7,13 +7,28 @@ This repository contains code to reproduce the simulation experiment tables pres
 1. Download the ZIP file and open the folder titled `spatialDiD-simulation-code-main`
 2. Open the R Project file titled `spatialDiD-simulation-code-tutorial.Rproj`
 3. Open the R Markdown file titled `reproducibility-guide-spatial-DiD-simulation-code.Rmd`
-4. Knit the file to HTML. The code will begin to run automatically.
+4. Knit the file to HTML — the code will begin to run automatically
+
+## Repository Structure
+
+The following folders are required to run the code and must remain in the same directory as the R Project file:
+
+- `dgp-cls-homoskedastic` — simulated data for the traditional DiD model
+- `dgp-us-homoskedastic` — simulated data for the uniform spatial DiD model
+- `dgp-svc-homoskedastic` — simulated data for the spatially varying coefficient DiD model
+
+Each folder contains:
+
+- `data/` — the simulated dataset for that model type, along with the adjacency matrix for California counties
+- `src/` — JAGS model files used to fit each of the three models to the simulated data
+
+Each folder also includes the original scripts used to generate and prepare the data. These scripts are not needed to run the reproducibility guide but are provided for reference.
 
 ## Requirements
 
 This project requires the following software and packages:
 
-- **JAGS:** must be installed on your machine before running the code.
+- **JAGS** — must be installed on your machine before running the code
 - **R packages:** `tidyverse`, `rjags`, `coda`, `kableExtra`, `loo`
 
 ## Just Want to View the Output?
