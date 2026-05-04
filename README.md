@@ -22,4 +22,4 @@ To view the reproduced tables without re-running the script, simply open the HTM
 
 ---
 
-*Questions, comments, or concerns? Feel free to reach out to Valentina at valentina214@g.ucla.edu*
+*Questions, comments, or concerns? Feel free to reach out to me (Valentina) at valentina214@g.ucla.edu*!
