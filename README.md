@@ -7,4 +7,8 @@ The code included in this repository is designed to reproduce the tables initial
 3. Once inside the R project, open the R Markdown file titled 'reproducibility-guide-spatial-DiD-simulation-code.Rmd.'
 4. Knit the file to HTML and the code should begin to run.
 
-Please note that the Bayesian modeling in this study was done using JAGS, and thus requires installation of the JAGS software on the computer of the user. Several R packages are also required, including `tidyverse`, `rjags`, `coda`, `kableExtra` and `loo`.  
+Please note that the Bayesian modeling in this study was done using JAGS, and thus requires installation of the JAGS software on the computer of the user. Several R packages are also required, including `tidyverse`, `rjags`, `coda`, `kableExtra` and `loo`.
+
+If you wish to simply view the code and reproduced tables without re-running the entirescript, simply open the HTML file included in the repository in your chosen browser.
+
+Thank you! Please feel free to reach out to me (Valentina) at valentina214@g.ucla.edu if you have any questions, comments, or concerns! 
