@@ -2338,7 +2338,7 @@ Reproducing Table A1
 
 </h3>
 
-```{r printing appendix table A1}
+```{r printing appendix table A1, echo=FALSE}
 kable(table_A1_df,
       format = "html",
       booktabs = TRUE,
