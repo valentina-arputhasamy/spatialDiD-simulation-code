@@ -1,14 +1,25 @@
-# spatialDiD-simulation-code
+# Bayesian Hierarchical Spatial Difference-in-Difference Models
 
-The code included in this repository is designed to reproduce the tables initially generated for the simulation experiment provided in the Appendix of our paper, *Bayesian Hierarchical Spatial Difference-in-Difference Models*. For transparency, the code used to obtain the posterior samples, credible intervals, and model performance metrics presented in these tables is also included the R Markdown file titled **reproducibility-guide-spatial-DiD-simulation-code.Rmd**. To create the document, simply:
+This repository contains code to reproduce the simulation experiment tables presented in the Appendix of our paper, *Bayesian Hierarchical Spatial Difference-in-Difference Models*. The R Markdown file **reproducibility-guide-spatial-DiD-simulation-code.Rmd** includes all code used to obtain the posterior samples, credible intervals, and model performance metrics reported in these tables.
 
-1. Download the ZIP file and open the folder titled 'spatialDiD-simulation-code-main.'
-2. Open the `R Project` file titled 'spatialDiD-simulation-code-tutorial.Rproj.'
-3. Once inside the R project, open the R Markdown file titled 'reproducibility-guide-spatial-DiD-simulation-code.Rmd.'
-4. Knit the file to HTML and the code should begin to run.
+## Getting Started
 
-Please note that the Bayesian modeling in this study was done using JAGS, and thus requires installation of the JAGS software on the computer of the user. Several R packages are also required, including `tidyverse`, `rjags`, `coda`, `kableExtra` and `loo`.
+1. Download the ZIP file and open the folder titled `spatialDiD-simulation-code-main`
+2. Open the R Project file titled `spatialDiD-simulation-code-tutorial.Rproj`
+3. Open the R Markdown file titled `reproducibility-guide-spatial-DiD-simulation-code.Rmd`
+4. Knit the file to HTML. The code will begin to run automatically.
 
-If you wish to simply view the code and reproduced tables without re-running the entirescript, simply open the HTML file included in the repository in your chosen browser.
+## Requirements
 
-Thank you! Please feel free to reach out to me (Valentina) at valentina214@g.ucla.edu if you have any questions, comments, or concerns! 
+This project requires the following software and packages:
+
+- **JAGS** — must be installed on your machine before running the code.
+- **R packages:** `tidyverse`, `rjags`, `coda`, `kableExtra`, `loo`
+
+## Just Want to View the Output?
+
+To view the reproduced tables without re-running the script, simply open the HTML file included in the repository in your browser.
+
+---
+
+*Questions, comments, or concerns? Feel free to reach out to Valentina at valentina214@g.ucla.edu*
