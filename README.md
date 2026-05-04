@@ -13,7 +13,7 @@ This repository contains code to reproduce the simulation experiment tables pres
 
 This project requires the following software and packages:
 
-- **JAGS** — must be installed on your machine before running the code.
+- **JAGS:** must be installed on your machine before running the code.
 - **R packages:** `tidyverse`, `rjags`, `coda`, `kableExtra`, `loo`
 
 ## Just Want to View the Output?
