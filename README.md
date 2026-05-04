@@ -20,15 +20,14 @@ The following folders are required to run the code and must remain in the same d
 Each folder contains:
 
 - `data/` — the simulated dataset for that model type, along with the adjacency matrix for California counties
-- `src/` — JAGS model files used to fit each of the three models to the simulated data
-
-Each folder also includes the original scripts used to generate and prepare the data. These scripts are not needed to run the reproducibility guide but are provided for reference.
+- `src/` — JAGS model files used to fit each of the three models to the simulated data, along with the original scripts used to generate and prepare the data. The data generation and preparation scripts are not needed to run the reproducibility guide but are provided for reference.
+- `test/` — original R scripts for fitting each model (`model_fit/`) and evaluating model performance using the WAIC (`model_choice/`). These files are not required to create the HTML reproducibility guide, but are included for users who wish to individually run each model on each dataset and compare model performance.
 
 ## Requirements
 
 This project requires the following software and packages:
 
-- **JAGS** — must be installed on your machine before running the code
+- **JAGS:** must be installed on your machine before running the code
 - **R packages:** `tidyverse`, `rjags`, `coda`, `kableExtra`, `loo`
 
 ## Just Want to View the Output?
@@ -38,3 +37,4 @@ To view the reproduced tables without re-running the script, simply open the HTM
 ---
 
 *Questions, comments, or concerns? Feel free to reach out to me (Valentina) at valentina214@g.ucla.edu*!
+
